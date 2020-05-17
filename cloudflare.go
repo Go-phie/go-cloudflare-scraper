@@ -1,9 +1,10 @@
-package scraper
+package main
 
 import (
 	"bytes"
 	"errors"
 	"fmt"
+	"strings"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -25,14 +26,14 @@ type Transport struct {
 
 func NewClient() (c *http.Client, err error) {
 
-	scraper_transport, err := NewTransport(http.DefaultTransport)
+	scraperTransport, err := NewTransport(http.DefaultTransport)
 	if err != nil {
 		return
 	}
 
 	c = &http.Client{
-		Transport: scraper_transport,
-		Jar:       scraper_transport.cookies,
+		Transport: scraperTransport,
+		Jar:       scraperTransport.Cookies,
 	}
 
 	return
@@ -61,8 +62,8 @@ func (t Transport) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 
 	// Check if Cloudflare anti-bot is on
-	server_header := resp.Header.Get("Server")
-	if resp.StatusCode == 503 && (server_header == "cloudflare-nginx" || server_header == "cloudflare") {
+	serverHeader := resp.Header.Get("Server")
+	if resp.StatusCode == 503 && (serverHeader == "cloudflare-nginx" || serverHeader == "cloudflare") {
 		log.Printf("Solving challenge for %s", resp.Request.URL.Hostname())
 		resp, err := t.solveChallenge(resp)
 
@@ -72,7 +73,7 @@ func (t Transport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return resp, err
 }
 
-var jschlRegexp = regexp.MustCompile(`name="jschl_vc" value="(\w+)"`)
+var jschlRegexp = regexp.MustCompile(`value="(\w+)" id="jschl-vc"`)
 var passRegexp = regexp.MustCompile(`name="pass" value="(.+?)"`)
 
 func (t Transport) solveChallenge(resp *http.Response) (*http.Response, error) {
@@ -138,30 +139,42 @@ func (t Transport) evaluateJS(js string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	fmt.Println(err)
 	return result.ToInteger()
 }
 
 var jsRegexp = regexp.MustCompile(
-	`setTimeout\(function\(\){\s+(var ` +
-		`s,t,o,p,b,r,e,a,k,i,n,g,f.+?\r?\n[\s\S]+?a\.value =.+?)\r?\n`,
+	`setTimeout\(function\(\){\s*(var s,t,o,p, b,r,e,a,k,i,n,g,f.+?\r?\n[\s\S]+?a\.value\s*=.+?\n.*)\r?\n(?:[^{<>]*},\s*(\d{4,}))?`,
 )
-var jsReplace1Regexp = regexp.MustCompile(`a\.value = (parseInt\(.+?\)).+`)
-var jsReplace2Regexp = regexp.MustCompile(`\s{3,}[a-z](?: = |\.).+`)
+// var jsReplace2Regexp = regexp.MustCompile(`\s{3,}[a-z](?: = |\.).+`)
+var jsReplace2Regexp = regexp.MustCompile(`/https\?\:\\/\\//`)
 var jsReplace3Regexp = regexp.MustCompile(`[\n\\']`)
-
+var jsReplace4Regexp = regexp.MustCompile(`<span`)
+var jsReplace5Regexp = regexp.MustCompile(`/span>`)
+var jsReplace6Regexp = regexp.MustCompile(`; 121`)
+var jsReplace7Regexp = regexp.MustCompile(`=/>`)
+var jsReplace8Regexp = regexp.MustCompile(`jschl\+answer.replace\(\+, -\)`)
+var jsReplace9Regexp = regexp.MustCompile(`\(challenge-form\)`)
 func (t Transport) extractJS(body string) (string, error) {
 	matches := jsRegexp.FindStringSubmatch(body)
 	if len(matches) == 0 {
 		return "", errors.New("No matching javascript found")
 	}
-
+	
 	js := matches[1]
-	js = jsReplace1Regexp.ReplaceAllString(js, "$1")
-	js = jsReplace2Regexp.ReplaceAllString(js, "")
-
+	// replacementMap := make(map[regexp.Regexp]string)
+	
 	// Strip characters that could be used to exit the string context
 	// These characters are not currently used in Cloudflare's arithmetic snippet
 	js = jsReplace3Regexp.ReplaceAllString(js, "")
+	js = jsReplace4Regexp.ReplaceAllString(js, "'<span")
+	js = jsReplace5Regexp.ReplaceAllString(js, "/span>'")
+	js = jsReplace6Regexp.ReplaceAllString(js, "'; 121';")
+	js = jsReplace7Regexp.ReplaceAllString(js, "='/'>")
+	js = jsReplace8Regexp.ReplaceAllString(js, "'jschl+answer'.replace('+', '-')")
+	js = jsReplace9Regexp.ReplaceAllString(js, "('challenge-form')")
+	js = strings.Replace(js, "t.match(/https?:///)[0];", `t.match(/https?:\/\//)[0];`, -1)
+	
 
 	return js, nil
 }
