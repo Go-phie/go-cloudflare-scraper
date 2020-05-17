@@ -9,8 +9,6 @@ import (
 	"os"
 	"sync"
 	"time"
-
-	scraper "github.com/Go-phie/go-cloudflare-scraper"
 )
 
 func makeRequest(c *http.Client, url string) {
@@ -40,7 +38,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	t, err := scraper.NewTransport(http.DefaultTransport)
+	t, err := NewTransport(http.DefaultTransport)
 	if err != nil {
 		log.Fatal(err)
 	}

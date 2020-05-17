@@ -103,7 +103,7 @@ func (t Transport) solveChallenge(resp *http.Response) (*http.Response, error) {
 		return nil, err
 	}
 
-	answer, err := t.evaluateJS(js)
+	answer, err := t.evaluateJS(js, string(b))
 	if err != nil {
 		return nil, err
 	}
@@ -132,18 +132,8 @@ func (t Transport) solveChallenge(resp *http.Response) (*http.Response, error) {
 	return resp, nil
 }
 
-func (t Transport) evaluateJS(js string) (int64, error) {
-	vm := otto.New()
-	result, err := vm.Run(js)
-	if err != nil {
-		return 0, err
-	}
-	fmt.Println(err)
-	return result.ToInteger()
-}
-
 var jsRegexp = regexp.MustCompile(
-	`setTimeout\(function\(\){\s*(var s,t,o,p, b,r,e,a,k,i,n,g,f.+?\r?\n[\s\S]+?a\.value\s*=.+?)\r?\n(?:[^{<>]*},\s*(\d{4,}))?`,
+	`setTimeout\(function\(\){\s*(var s,t,o,p, b,r,e,a,k,i,n,g,f, .+?\r?\n[\s\S]+?a\.value\s*=.+?)\r?\n(?:[^{<>]*},\s*(\d{4,}))?`,
 )
 
 var jsReplace1Regexp = regexp.MustCompile(`a\.value = `)
@@ -157,7 +147,34 @@ var jsReplace4Regexp = regexp.MustCompile(`<span`)
 var jsReplace5Regexp = regexp.MustCompile(`/span>`)
 var jsReplace6Regexp = regexp.MustCompile(`; 121`)
 var jsReplace7Regexp = regexp.MustCompile(`=/>`)
+var pRegexp = regexp.MustCompile(`var p = .*?;`)
 var convertK = regexp.MustCompile(`k = (\w+);`)
+
+// Document : fake JS dom for document
+type Document struct{
+	innerHTML string
+}
+
+func (t Transport) evaluateJS(js string, body string) (int64, error) {
+	matchesK := convertK.FindStringSubmatch(js)
+	htmlComp := fmt.Sprintf(`\<div id\=\"%s.*?\">(.*?)\<\/div\>`, matchesK[1])
+	innerHTMLK := regexp.MustCompile(htmlComp)
+	innerDetails := innerHTMLK.FindStringSubmatch(body)[1]
+	js = convertK.ReplaceAllString(js, "k = '" + matchesK[1] + "';")
+	js = pRegexp.ReplaceAllString(js, "var p = document.innerHTML;")
+
+	vm := otto.New()
+	doc := &Document{}
+	doc.innerHTML = innerDetails
+	vm.Set("document", doc)
+	fmt.Println(js)
+	result, err := vm.Run(js)
+	if err != nil {
+		return 0, err
+	}
+	return result.ToInteger()
+}
+
 
 func (t Transport) extractJS(body string) (string, error) {
 	matches := jsRegexp.FindStringSubmatch(body)
@@ -175,9 +192,7 @@ func (t Transport) extractJS(body string) (string, error) {
 	js = jsReplace5Regexp.ReplaceAllString(js, "/span>'")
 	js = jsReplace6Regexp.ReplaceAllString(js, "'; 121';")
 	js = jsReplace7Regexp.ReplaceAllString(js, "='/'>")
-	matchesK := convertK.FindStringSubmatch(js)
-	js = convertK.ReplaceAllString(js, "k = '" + matchesK[1] + "';")
-	fmt.Println(js)
 
+	fmt.Println(js)
 	return js, nil
 }
