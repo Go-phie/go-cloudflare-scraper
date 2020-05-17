@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"strings"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -144,17 +143,20 @@ func (t Transport) evaluateJS(js string) (int64, error) {
 }
 
 var jsRegexp = regexp.MustCompile(
-	`setTimeout\(function\(\){\s*(var s,t,o,p, b,r,e,a,k,i,n,g,f.+?\r?\n[\s\S]+?a\.value\s*=.+?\n.*)\r?\n(?:[^{<>]*},\s*(\d{4,}))?`,
+	`setTimeout\(function\(\){\s*(var s,t,o,p, b,r,e,a,k,i,n,g,f.+?\r?\n[\s\S]+?a\.value\s*=.+?)\r?\n(?:[^{<>]*},\s*(\d{4,}))?`,
 )
-// var jsReplace2Regexp = regexp.MustCompile(`\s{3,}[a-z](?: = |\.).+`)
-var jsReplace2Regexp = regexp.MustCompile(`/https\?\:\\/\\//`)
+
+var jsReplace1Regexp = regexp.MustCompile(`a\.value = `)
+var jsReplace2Regexp = regexp.MustCompile(`t(\.innerHTML)?\s*=\s*.*\n`)
+var documentlines = regexp.MustCompile(`[a-z] = document.getElementById\(.*?\)\;`)
 var jsReplace3Regexp = regexp.MustCompile(`[\n\\']`)
+var emptyRegexStr = []*regexp.Regexp{jsReplace1Regexp, jsReplace2Regexp, jsReplace3Regexp, documentlines}
+
 var jsReplace4Regexp = regexp.MustCompile(`<span`)
 var jsReplace5Regexp = regexp.MustCompile(`/span>`)
 var jsReplace6Regexp = regexp.MustCompile(`; 121`)
 var jsReplace7Regexp = regexp.MustCompile(`=/>`)
-var jsReplace8Regexp = regexp.MustCompile(`jschl\+answer.replace\(\+, -\)`)
-var jsReplace9Regexp = regexp.MustCompile(`\(challenge-form\)`)
+
 func (t Transport) extractJS(body string) (string, error) {
 	matches := jsRegexp.FindStringSubmatch(body)
 	if len(matches) == 0 {
@@ -162,19 +164,16 @@ func (t Transport) extractJS(body string) (string, error) {
 	}
 	
 	js := matches[1]
-	// replacementMap := make(map[regexp.Regexp]string)
-	
 	// Strip characters that could be used to exit the string context
 	// These characters are not currently used in Cloudflare's arithmetic snippet
-	js = jsReplace3Regexp.ReplaceAllString(js, "")
+	for _, empt := range(emptyRegexStr) {
+		js = empt.ReplaceAllString(js, "")
+	}
 	js = jsReplace4Regexp.ReplaceAllString(js, "'<span")
 	js = jsReplace5Regexp.ReplaceAllString(js, "/span>'")
 	js = jsReplace6Regexp.ReplaceAllString(js, "'; 121';")
 	js = jsReplace7Regexp.ReplaceAllString(js, "='/'>")
-	js = jsReplace8Regexp.ReplaceAllString(js, "'jschl+answer'.replace('+', '-')")
-	js = jsReplace9Regexp.ReplaceAllString(js, "('challenge-form')")
-	js = strings.Replace(js, "t.match(/https?:///)[0];", `t.match(/https?:\/\//)[0];`, -1)
-	
+	fmt.Println(js)
 
 	return js, nil
 }
